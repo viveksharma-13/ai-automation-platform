@@ -1,0 +1,180 @@
+"use client";
+
+import {
+  addEdge,
+  Background,
+  Controls,
+  MiniMap,
+  ReactFlow,
+  useEdgesState,
+  useNodesState,
+  type Connection,
+  type Edge,
+  type Node,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import { useCallback, useMemo, useState } from "react";
+import { Button, Input, Textarea } from "@/components/ui";
+import type { WorkflowEdge, WorkflowNode } from "@/lib/api";
+
+const PALETTE = [
+  { type: "manual_trigger", label: "Manual trigger" },
+  { type: "webhook_trigger", label: "Webhook" },
+  { type: "http_request", label: "HTTP request" },
+  { type: "llm", label: "LLM" },
+  { type: "condition", label: "Condition" },
+  { type: "delay", label: "Delay" },
+  { type: "log", label: "Log" },
+  { type: "end", label: "End" },
+];
+
+function defaultConfig(type: string): Record<string, unknown> {
+  switch (type) {
+    case "http_request":
+      return { method: "GET", url: "https://httpbin.org/get", timeout_seconds: 30 };
+    case "llm":
+      return { prompt: "Summarize: {{trigger}}", model: "gpt-4o-mini", temperature: 0.2 };
+    case "condition":
+      return { left: "{{trigger.ok}}", operator: "eq", right: true };
+    case "delay":
+      return { seconds: 1 };
+    case "log":
+      return { message: "Reached log node" };
+    default:
+      return {};
+  }
+}
+
+function toFlow(nodes: WorkflowNode[], edges: WorkflowEdge[]) {
+  return {
+    nodes: nodes.map((n) => ({
+      id: n.id,
+      type: "default",
+      position: n.position,
+      data: { label: `${n.name}\n${n.type}`, node: n },
+      style: {
+        background: "#151d33",
+        color: "#e8eefc",
+        border: "1px solid #3b4c78",
+        borderRadius: 12,
+        padding: 8,
+        fontSize: 12,
+        whiteSpace: "pre-line" as const,
+        width: 180,
+      },
+    })),
+    edges: edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      sourceHandle: e.source_handle && e.source_handle !== "default" ? e.source_handle : undefined,
+      label: e.source_handle && e.source_handle !== "default" ? e.source_handle : undefined,
+      style: { stroke: "#5b8cff" },
+    })),
+  };
+}
+
+export function WorkflowEditor({
+  initialNodes,
+  initialEdges,
+  webhookToken,
+  onSave,
+  onPublish,
+  onRun,
+  saving,
+}: {
+  initialNodes: WorkflowNode[];
+  initialEdges: WorkflowEdge[];
+  webhookToken?: string | null;
+  onSave: (graph: { nodes: WorkflowNode[]; edges: WorkflowEdge[] }) => Promise<void>;
+  onPublish: () => Promise<void>;
+  onRun: () => Promise<void>;
+  saving?: boolean;
+}) {
+  const initial = useMemo(() => toFlow(initialNodes, initialEdges), [initialNodes, initialEdges]);
+  const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges);
+  const [selected, setSelected] = useState<Node | null>(null);
+
+  const onConnect = useCallback(
+    (connection: Connection) => setEdges((eds) => addEdge({ ...connection, style: { stroke: "#5b8cff" } }, eds)),
+    [setEdges],
+  );
+
+  function addNode(type: string) {
+    const id = `${type}-${Math.random().toString(36).slice(2, 8)}`;
+    const node: Node = {
+      id,
+      position: { x: 120 + nodes.length * 40, y: 80 + nodes.length * 20 },
+      data: {
+        label: `${PALETTE.find((p) => p.type === type)?.label}\n${type}`,
+        node: {
+          id,
+          type,
+          name: PALETTE.find((p) => p.type === type)?.label || type,
+          config: defaultConfig(type),
+          input_mapping: {},
+          output_mapping: {},
+          position: { x: 120, y: 80 },
+        } satisfies WorkflowNode,
+      },
+      style: {
+        background: "#151d33",
+        color: "#e8eefc",
+        border: "1px solid #3b4c78",
+        borderRadius: 12,
+        padding: 8,
+        fontSize: 12,
+        width: 180,
+        whiteSpace: "pre-line",
+      },
+    };
+    setNodes((curr) => [...curr, node]);
+  }
+
+  function graphPayload() {
+    const wfNodes: WorkflowNode[] = nodes.map((n) => {
+      const data = (n.data as { node: WorkflowNode }).node;
+      return {
+        ...data,
+        id: n.id,
+        position: n.position,
+      };
+    });
+    const wfEdges: WorkflowEdge[] = edges.map((e: Edge) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      source_handle: (e.sourceHandle as WorkflowEdge["source_handle"]) || "default",
+    }));
+    return { nodes: wfNodes, edges: wfEdges };
+  }
+
+  function updateSelected(patch: Partial<WorkflowNode> & { config?: Record<string, unknown> }) {
+    if (!selected) return;
+    setNodes((curr) =>
+      curr.map((n) => {
+        if (n.id !== selected.id) return n;
+        const node = { ...(n.data as { node: WorkflowNode }).node, ...patch };
+        if (patch.config) node.config = { ...node.config, ...patch.config };
+        return {
+          ...n,
+          data: { label: `${node.name}\n${node.type}`, node },
+        };
+      }),
+    );
+    setSelected((curr) => {
+      if (!curr) return curr;
+      const node = { ...(curr.data as { node: WorkflowNode }).node, ...patch };
+      if (patch.config) node.config = { ...node.config, ...patch.config };
+      return { ...curr, data: { ...curr.data, node } };
+    });
+  }
+
+  const selectedNode = selected ? ((selected.data as { node: WorkflowNode }).node as WorkflowNode) : null;
+
+  return (
+    <div className="flex h-[calc(100vh-8rem)] overflow-hidden rounded-2xl border border-[var(--border)]">
+      <aside className="w-56 border-r border-[var(--border)] bg-[#0e1528] p-3">
+        <div className="mb-3 text-xs uppercase tracking-wide text-[var(--muted)]">Nodes</div>
+        <div className="space-y-2">

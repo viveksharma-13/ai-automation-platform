@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WorkflowGraph",
+  "type": "object",
+  "required": ["nodes", "edges"],
+  "properties": {
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "name"],
+        "properties": {
+          "id": { "type": "string" },
+          "type": {
+            "enum": [
+              "webhook_trigger",
+              "manual_trigger",
+              "http_request",
+              "condition",
+              "llm",
+              "delay",
+              "log",
+              "end"
+            ]
+          },
+          "name": { "type": "string" },
+          "config": { "type": "object" },
+          "input_mapping": { "type": "object" },
+          "output_mapping": { "type": "object" },
+          "position": {
+            "type": "object",
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "source", "target"],
+        "properties": {
+          "id": { "type": "string" },
+          "source": { "type": "string" },
+          "target": { "type": "string" },
+          "source_handle": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+FROM node:22-alpine AS deps
+WORKDIR /web
+COPY apps/web/package.json apps/web/package-lock.json* ./
+RUN npm install
+
+FROM node:22-alpine AS builder
+WORKDIR /web
+COPY --from=deps /web/node_modules ./node_modules
+COPY apps/web ./
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+RUN npm run build
+
+FROM node:22-alpine AS runner
+WORKDIR /web
+ENV NODE_ENV=production
+COPY --from=builder /web/.next ./.next
+COPY --from=builder /web/node_modules ./node_modules
+COPY --from=builder /web/package.json ./package.json
+COPY --from=builder /web/public ./public
+EXPOSE 3000
+CMD ["npm", "run", "start"]
